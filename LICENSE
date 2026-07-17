@@ -1,0 +1,10 @@
+Moataz Dow is licensed under the GNU General Public License, version 3 or (at your option) any later version (GPL-3.0-or-later).
+
+Copyright for original NewPipe code remains with NewPipe contributors and NewPipe e.V. Copyright for Moataz Dow modifications remains with their respective contributors.
+
+The complete license text is available from the Free Software Foundation:
+https://www.gnu.org/licenses/gpl-3.0.txt
+
+SPDX-License-Identifier: GPL-3.0-or-later
+
+When GitHub Actions prepares the application source, the complete upstream NewPipe LICENSE file is also included in the build checkout and source distribution.
