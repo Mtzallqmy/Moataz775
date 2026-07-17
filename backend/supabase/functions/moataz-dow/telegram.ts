@@ -145,7 +145,7 @@ export async function handleTelegramWebhook(req: Request): Promise<Response> {
   if (lower.startsWith("/formats")) {
     await sendMessage(
       chatId,
-      "يعرض التطبيق الصيغ والدقات والصوت والترجمات المتاحة من نظام NewPipe، ثم تختار ما تريد تنزيله.",
+      "يعرض Moataz Dow دقات الفيديو والصوت فقط والترجمات والصيغ المتاحة، ثم تختار الجودة المناسبة للتنزيل.",
     );
     return json({ ok: true });
   }
