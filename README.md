@@ -1,57 +1,95 @@
 # Moataz Dow
 
-**Moataz Dow** is a modern Android media browser and downloader distribution based on NewPipe, with a first-class Telegram Bot integration.
+**Moataz Dow** is a modern Android media browser and downloader based on NewPipe, with a secure central Telegram bot, device pairing, and an administrator dashboard.
 
-> Independent project. Not affiliated with NewPipe or Telegram.
+> Independent GPL project. Not affiliated with NewPipe, YouTube, Supabase, or Telegram.
 
 ## Highlights
 
-- New visual identity and application name: **Moataz Dow**.
-- NewPipe playback, background audio, playlists, supported services, and download workflow.
-- Telegram Bot connection using a bot token stored with Android Keystore encryption.
-- Connection diagnostics: `getMe`, webhook status, pending updates, bot identity, and last error.
-- Command synchronization and browser for `/start`, `/help`, `/download`, `/formats`, and `/status`.
-- Foreground long-polling service for reliable Telegram updates while explicitly enabled by the user.
-- Telegram documents, audio, and video can be downloaded into the device's Downloads collection.
-- URL requests from Telegram are queued and opened in Moataz Dow's native NewPipe routing/download flow.
-- Two APK outputs from GitHub Actions:
+- New Android identity, icon, package ID, Arabic interface and modern Telegram screen.
+- NewPipe playback, background audio, playlists, supported services, subtitles and native format selection.
+- One central Telegram bot for all users; users never paste or receive the bot token.
+- One-tap pairing through a short-lived Telegram `start` code.
+- Anonymous installation identity and random device secret protected by Android Keystore.
+- Device-scoped task delivery: each installation can retrieve only its own Telegram requests.
+- Foreground synchronization with automatic retry, local request queue and connection diagnostics.
+- Administrator dashboard with signed secure sessions, bot checks, command synchronization, device overview and remote unlinking.
+- Supabase Edge Function backend and isolated PostgreSQL tables with RLS and revoked client access.
+- Two minified APK outputs from GitHub Actions:
   - `arm64-v8a`: smaller build for modern 64-bit Android devices.
-  - `universal`: compatible with a wider range of supported devices.
+  - `universal`: compatible with all ABIs included by the Android build.
 
-## Repository model
+## Repository structure
 
-This repository is a maintainable customization layer. GitHub Actions checks out a pinned official NewPipe release, applies the reviewed Moataz Dow overlay, runs validation, and builds APKs. This keeps upstream updates auditable and avoids carrying unrelated historical files.
-
-## Build
-
-```bash
-python3 scripts/prepare-source.py --source build/NewPipe --version 1.0.0
-cd build/NewPipe
-./gradlew assembleDebug
+```text
+.github/workflows/               Android/backend validation and release automation
+backend/supabase/functions/      Central bot API, webhook and admin dashboard
+backend/supabase/migrations/     Isolated database schema, indexes and RLS
+contracts/                       API and security documentation
+coverage/                        Maintained source overlay for NewPipe
+scripts/                         Reproducible source preparation
 ```
 
-The workflow performs the upstream checkout automatically.
+The Android source is maintained as a reviewed overlay. GitHub Actions checks out the pinned official NewPipe release, applies Moataz Dow changes, validates the backend, builds release APKs, verifies signatures and creates checksums.
+
+## Telegram user flow
+
+1. Open **Moataz Dow → Telegram connection**.
+2. Press **Connect through Telegram**.
+3. The app creates a ten-minute pairing code and opens the official bot.
+4. Press **Start** in Telegram.
+5. Send a link to the bot.
+6. The request appears only on the paired Android installation, where the user chooses the available format and quality.
+
+No bot token is stored in the APK or on user devices.
+
+## Backend
+
+The deployed API base URL is:
+
+```text
+https://xfjybpzadqelzzrrdjhd.supabase.co/functions/v1/moataz-dow
+```
+
+The health endpoint is `/health`; the administrator interface is `/admin`. Bot and administrator secrets remain unset until the owner supplies them through the hosting platform.
+
+See [backend documentation](backend/README.md), [Telegram flow](docs/TELEGRAM.md), [architecture](docs/ARCHITECTURE.md), and [security model](SECURITY.md).
+
+## Local Android build
+
+```bash
+git clone --depth 1 --branch v0.28.8 https://github.com/TeamNewPipe/NewPipe.git build/NewPipe
+python3 scripts/prepare-source.py --source build/NewPipe --version 1.0.0
+cd build/NewPipe
+./gradlew assembleRelease
+```
+
+A signing key must be supplied through the documented environment variables for an installable production release.
 
 ## Release signing
 
-Production releases require these GitHub Actions secrets:
+Production tags require these GitHub Actions secrets:
 
 - `ANDROID_KEYSTORE_BASE64`
 - `ANDROID_KEYSTORE_PASSWORD`
 - `ANDROID_KEY_ALIAS`
 - `ANDROID_KEY_PASSWORD`
 
-The signing key is never committed. Push a tag such as `v1.0.0` after configuring the secrets; GitHub Actions builds, signs, checksums, and publishes both APKs.
+The private signing key is never committed. A tag such as `v1.0.0` triggers backend validation, Android build, signature verification, SHA-256 checksums, build provenance, and GitHub Release publication.
 
-## Telegram setup
+## Backend secrets
 
-1. Create a bot using BotFather.
-2. Open **Moataz Dow → Telegram Bot**.
-3. Paste the token and save it.
-4. Run **Test connection**, then **Sync commands**.
-5. Enable the sync service.
+The central service requires:
 
-See [Telegram integration](docs/TELEGRAM.md) and [security model](SECURITY.md).
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_BOT_USERNAME`
+- `TELEGRAM_WEBHOOK_SECRET`
+- `ADMIN_USERNAME`
+- `ADMIN_PASSWORD_SHA256`
+- `ADMIN_SESSION_SECRET`
+- `PUBLIC_API_URL`
+
+Real values must be stored only in Supabase project secrets.
 
 ## License
 
