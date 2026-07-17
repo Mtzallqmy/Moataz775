@@ -26,7 +26,7 @@
 backend/supabase/functions/      Central bot API, webhook and admin dashboard
 backend/supabase/migrations/     Isolated database schema, indexes and RLS
 contracts/                       API and security documentation
-coverage/                        Maintained source overlay for NewPipe
+overlay/                         Maintained Android source overlay for NewPipe
 scripts/                         Reproducible source preparation
 ```
 
