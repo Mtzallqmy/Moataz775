@@ -51,6 +51,21 @@ jobs:
       - name: Type-check edge function
         run: deno check backend/supabase/functions/moataz-dow/index.ts
 
+      - name: Smoke-test deployed pairing API
+        shell: bash
+        run: |
+          set -euo pipefail
+          RESPONSE=$(curl --fail --silent --show-error --max-time 20 \
+            "$DEFAULT_API_BASE_URL/health")
+          python3 - "$RESPONSE" <<'PY'
+          import json
+          import sys
+          payload = json.loads(sys.argv[1])
+          if payload.get("ok") is not True or payload.get("service") != "moataz-dow":
+              raise SystemExit(f"Unexpected health response: {payload}")
+          print("Service health OK; Telegram configured:", payload.get("telegram_configured"))
+          PY
+
       - name: Validate migration safety markers
         shell: bash
         run: |
