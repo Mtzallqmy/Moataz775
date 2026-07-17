@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="telegram_integration_title">الاتصال بتيليجرام</string>
+    <string name="telegram_pairing_section">ربط حساب تيليجرام</string>
+    <string name="telegram_pairing_description">يستخدم Moataz Dow بوتًا رسميًا واحدًا. أنشئ رمزًا مؤقتًا وافتح تيليجرام واضغط Start، دون إدخال أي توكن داخل الهاتف.</string>
+    <string name="telegram_pair_code_label">رمز الاقتران المؤقت</string>
+    <string name="telegram_paired_account_label">حساب تيليجرام المرتبط</string>
+    <string name="telegram_no_account">لا يوجد حساب مرتبط</string>
+    <string name="telegram_pair_now">الربط عبر تيليجرام</string>
+    <string name="telegram_refresh_status">تحديث الحالة</string>
+    <string name="telegram_open_bot">فتح البوت</string>
+    <string name="telegram_sync_section">مزامنة الجهاز</string>
+    <string name="telegram_start_service">تشغيل المزامنة</string>
+    <string name="telegram_stop_service">إيقاف المزامنة</string>
+    <string name="telegram_clear_queue">مسح الطلبات المحلية</string>
+    <string name="telegram_unpair">إلغاء ربط حساب تيليجرام</string>
+    <string name="telegram_queue_section">طلبات التحميل</string>
+    <string name="telegram_queue_description">تظهر هنا الروابط المرسلة إلى البوت. افتح أي رابط لاختيار الصيغة والجودة من نظام Moataz Dow الأصلي.</string>
+    <string name="telegram_not_paired">هذه النسخة غير مرتبطة بتيليجرام.</string>
+    <string name="telegram_paired">تم ربط تيليجرام.</string>
+    <string name="telegram_account_linked">تم ربط حساب تيليجرام</string>
+    <string name="telegram_unpaired">تم إلغاء ربط حساب تيليجرام.</string>
+    <string name="telegram_creating_pair_code">جارٍ إنشاء رمز اقتران آمن…</string>
+    <string name="telegram_pair_code_ready">تم إنشاء الرمز. أكمل الربط داخل تيليجرام.</string>
+    <string name="telegram_checking_pairing">جارٍ فحص حالة الربط…</string>
+    <string name="telegram_unpairing">جارٍ إلغاء الربط…</string>
+    <string name="telegram_bot_not_configured">لم يقم المشرف بإعداد البوت المركزي بعد.</string>
+    <string name="telegram_create_code_first">أنشئ رمز اقتران أولًا.</string>
+    <string name="telegram_connecting">جارٍ الاتصال الآمن…</string>
+    <string name="telegram_error_format">خطأ: %1$s</string>
+    <string name="telegram_service_title">تيليجرام Moataz Dow</string>
+    <string name="telegram_service_description">استقبال روابط هذا الجهاز فقط من خدمة البوت المركزية.</string>
+    <string name="telegram_service_state_format">الحالة: %1$s\nآخر مزامنة: %2$s\nآخر خطأ: %3$s</string>
+    <string name="telegram_running">تعمل</string>
+    <string name="telegram_stopped">متوقفة</string>
+    <string name="telegram_never">لم تتم</string>
+    <string name="telegram_no_errors">لا يوجد</string>
+    <string name="telegram_sync_error">سيعاد الاتصال تلقائيًا.</string>
+    <string name="telegram_queue_count">عدد الطلبات: %1$d</string>
+    <string name="telegram_queue_empty">لا توجد طلبات تحميل من تيليجرام.</string>
+    <string name="telegram_open_in_app">فتح الصيغ</string>
+    <string name="telegram_remove">حذف</string>
+</resources>
