@@ -1,16 +1,21 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 package org.schabi.newpipe.telegram;
 
+import android.app.ActivityNotFoundException;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
+import android.view.View;
+import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.annotation.IdRes;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
@@ -41,135 +46,223 @@ public final class TelegramIntegrationActivity extends AppCompatActivity {
     private TextView pairedAccount;
     private TextView serviceDetails;
     private LinearLayout queueContainer;
+    private MaterialButton pairButton;
+    private MaterialButton refreshButton;
+    private MaterialButton unpairButton;
     private MaterialButton serviceButton;
     private MaterialButton openBotButton;
     private String currentBotUrl = "";
+    private boolean receiverRegistered;
+    private boolean initialized;
 
     private final BroadcastReceiver stateReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(final Context context, final Intent intent) {
-            refreshState();
+            if (initialized) {
+                refreshState();
+            }
         }
     };
 
     @Override
     protected void onCreate(@Nullable final Bundle savedInstanceState) {
-        ThemeHelper.setTheme(this, ServiceHelper.getSelectedServiceId(this));
+        try {
+            ThemeHelper.setTheme(this, ServiceHelper.getSelectedServiceId(this));
+        } catch (final Throwable ignored) {
+            // A broken saved theme must never prevent the diagnostics screen from opening.
+        }
         super.onCreate(savedInstanceState);
+
+        try {
+            initializeUi();
+            initialized = true;
+            refreshState();
+            refreshPairing();
+        } catch (final Throwable startupError) {
+            initialized = false;
+            renderStartupFailure(startupError);
+        }
+    }
+
+    private void initializeUi() {
         setContentView(R.layout.activity_telegram_integration);
 
-        final MaterialToolbar toolbar = findViewById(R.id.telegram_toolbar);
+        final MaterialToolbar toolbar = requireView(R.id.telegram_toolbar);
         toolbar.setNavigationOnClickListener(view -> finish());
 
         identityStore = new DeviceIdentityStore(this);
         client = new PairingApiClient();
         queueStore = new TelegramQueueStore(this);
 
-        connectionStatus = findViewById(R.id.telegram_connection_status);
-        pairCode = findViewById(R.id.telegram_pair_code);
-        pairedAccount = findViewById(R.id.telegram_paired_account);
-        serviceDetails = findViewById(R.id.telegram_service_details);
-        queueContainer = findViewById(R.id.telegram_queue_container);
-        serviceButton = findViewById(R.id.telegram_service_button);
-        openBotButton = findViewById(R.id.telegram_open_bot_button);
+        connectionStatus = requireView(R.id.telegram_connection_status);
+        pairCode = requireView(R.id.telegram_pair_code);
+        pairedAccount = requireView(R.id.telegram_paired_account);
+        serviceDetails = requireView(R.id.telegram_service_details);
+        queueContainer = requireView(R.id.telegram_queue_container);
+        pairButton = requireView(R.id.telegram_pair_button);
+        refreshButton = requireView(R.id.telegram_refresh_button);
+        unpairButton = requireView(R.id.telegram_unpair_button);
+        serviceButton = requireView(R.id.telegram_service_button);
+        openBotButton = requireView(R.id.telegram_open_bot_button);
 
-        findViewById(R.id.telegram_pair_button).setOnClickListener(view -> createPairing());
-        findViewById(R.id.telegram_refresh_button).setOnClickListener(view -> refreshPairing());
-        findViewById(R.id.telegram_unpair_button).setOnClickListener(view -> unpair());
-        findViewById(R.id.telegram_clear_queue_button).setOnClickListener(view -> {
+        pairButton.setOnClickListener(view -> createPairing());
+        refreshButton.setOnClickListener(view -> refreshPairing());
+        unpairButton.setOnClickListener(view -> unpair());
+        requireView(R.id.telegram_clear_queue_button).setOnClickListener(view -> {
             queueStore.clear();
             renderQueue();
         });
         openBotButton.setOnClickListener(view -> openBot());
         serviceButton.setOnClickListener(view -> toggleService());
+    }
 
-        refreshState();
-        refreshPairing();
+    @SuppressWarnings("unchecked")
+    private <T extends View> T requireView(@IdRes final int id) {
+        final View view = findViewById(id);
+        if (view == null) {
+            throw new IllegalStateException("Telegram screen is missing view " + id);
+        }
+        return (T) view;
     }
 
     @Override
     protected void onStart() {
         super.onStart();
-        ContextCompat.registerReceiver(this, stateReceiver,
-                new IntentFilter(TelegramSyncService.ACTION_STATE_CHANGED),
-                ContextCompat.RECEIVER_NOT_EXPORTED);
-        refreshState();
+        if (!initialized || receiverRegistered) {
+            return;
+        }
+        try {
+            ContextCompat.registerReceiver(this, stateReceiver,
+                    new IntentFilter(TelegramSyncService.ACTION_STATE_CHANGED),
+                    ContextCompat.RECEIVER_NOT_EXPORTED);
+            receiverRegistered = true;
+            refreshState();
+        } catch (final Throwable receiverError) {
+            showError(receiverError);
+        }
     }
 
     @Override
     protected void onStop() {
-        unregisterReceiver(stateReceiver);
+        if (receiverRegistered) {
+            try {
+                unregisterReceiver(stateReceiver);
+            } catch (final IllegalArgumentException ignored) {
+                // The system may already have removed the receiver during process recovery.
+            }
+            receiverRegistered = false;
+        }
         super.onStop();
     }
 
     private PairingApiClient.Identity identity() throws Exception {
-        return new PairingApiClient.Identity(identityStore.getOrCreateDeviceId(),
-                identityStore.getOrCreateDeviceSecret());
+        return identityStore.getOrCreateIdentity();
+    }
+
+    private PairingApiClient.Identity registerWithRecovery() throws Exception {
+        PairingApiClient.Identity identity = identity();
+        try {
+            client.register(identity);
+            return identity;
+        } catch (final PairingApiClient.ApiException error) {
+            if (!"device_identity_conflict".equals(error.code)
+                    && !"invalid_device_credentials".equals(error.code)) {
+                throw error;
+            }
+            identityStore.clear();
+            identity = identity();
+            client.register(identity);
+            return identity;
+        }
     }
 
     private void createPairing() {
         setBusy(getString(R.string.telegram_creating_pair_code));
+        setControlsEnabled(false);
         executor.execute(() -> {
             try {
-                final PairingApiClient.Identity identity = identity();
-                client.register(identity);
+                final PairingApiClient.Health health = client.health();
+                if (!health.ok) {
+                    throw new IllegalStateException(getString(R.string.telegram_service_unavailable));
+                }
+                if (!health.telegramConfigured) {
+                    throw new PairingApiClient.ApiException("telegram_not_configured", 503,
+                            getString(R.string.telegram_bot_not_configured));
+                }
+
+                final PairingApiClient.Identity identity = registerWithRecovery();
                 final PairingApiClient.PairCode result = client.createPairCode(identity);
                 currentBotUrl = result.botUrl;
-                runOnUiThread(() -> {
+                runOnUiThreadSafe(() -> {
                     pairCode.setText(result.code);
                     openBotButton.setEnabled(!currentBotUrl.isEmpty());
                     connectionStatus.setText(R.string.telegram_pair_code_ready);
+                    setControlsEnabled(true);
                     if (currentBotUrl.isEmpty()) {
                         connectionStatus.setText(R.string.telegram_bot_not_configured);
                     } else {
                         openBot();
                     }
                 });
-            } catch (final Exception error) {
+            } catch (final Throwable error) {
                 showError(error);
+                runOnUiThreadSafe(() -> setControlsEnabled(true));
             }
         });
     }
 
     private void refreshPairing() {
         setBusy(getString(R.string.telegram_checking_pairing));
+        setControlsEnabled(false);
         executor.execute(() -> {
             try {
-                final PairingApiClient.Identity identity = identity();
-                client.register(identity);
+                final PairingApiClient.Health health = client.health();
+                if (!health.ok) {
+                    throw new IllegalStateException(getString(R.string.telegram_service_unavailable));
+                }
+                final PairingApiClient.Identity identity = registerWithRecovery();
                 final PairingApiClient.PairStatus status = client.status(identity);
-                runOnUiThread(() -> {
+                runOnUiThreadSafe(() -> {
                     if (status.paired) {
                         connectionStatus.setText(R.string.telegram_paired);
                         pairedAccount.setText(status.telegramUsername.isEmpty()
                                 ? getString(R.string.telegram_account_linked)
                                 : "@" + status.telegramUsername);
+                    } else if (!health.telegramConfigured) {
+                        connectionStatus.setText(R.string.telegram_bot_not_configured);
+                        pairedAccount.setText(R.string.telegram_no_account);
                     } else {
                         connectionStatus.setText(R.string.telegram_not_paired);
                         pairedAccount.setText(R.string.telegram_no_account);
                     }
+                    setControlsEnabled(true);
                 });
-            } catch (final Exception error) {
+            } catch (final Throwable error) {
                 showError(error);
+                runOnUiThreadSafe(() -> setControlsEnabled(true));
             }
         });
     }
 
     private void unpair() {
         setBusy(getString(R.string.telegram_unpairing));
+        setControlsEnabled(false);
         executor.execute(() -> {
             try {
-                client.unpair(identity());
+                client.unpair(registerWithRecovery());
                 stopSyncService();
-                runOnUiThread(() -> {
+                runOnUiThreadSafe(() -> {
                     currentBotUrl = "";
                     pairCode.setText("—");
+                    openBotButton.setEnabled(false);
                     pairedAccount.setText(R.string.telegram_no_account);
                     connectionStatus.setText(R.string.telegram_unpaired);
+                    setControlsEnabled(true);
                     refreshState();
                 });
-            } catch (final Exception error) {
+            } catch (final Throwable error) {
                 showError(error);
+                runOnUiThreadSafe(() -> setControlsEnabled(true));
             }
         });
     }
@@ -177,20 +270,52 @@ public final class TelegramIntegrationActivity extends AppCompatActivity {
     private void toggleService() {
         if (TelegramSyncService.isRunning(this)) {
             stopSyncService();
-        } else {
-            ContextCompat.startForegroundService(this,
-                    new Intent(this, TelegramSyncService.class)
-                            .setAction(TelegramSyncService.ACTION_START));
+            refreshState();
+            return;
         }
-        refreshState();
+
+        setBusy(getString(R.string.telegram_checking_pairing));
+        serviceButton.setEnabled(false);
+        executor.execute(() -> {
+            try {
+                final PairingApiClient.Identity identity = registerWithRecovery();
+                final PairingApiClient.PairStatus status = client.status(identity);
+                if (!status.paired) {
+                    throw new PairingApiClient.ApiException("not_paired", 409,
+                            getString(R.string.telegram_pair_before_sync));
+                }
+                runOnUiThreadSafe(() -> {
+                    try {
+                        ContextCompat.startForegroundService(this,
+                                new Intent(this, TelegramSyncService.class)
+                                        .setAction(TelegramSyncService.ACTION_START));
+                        connectionStatus.setText(R.string.telegram_sync_started);
+                    } catch (final Throwable startError) {
+                        showError(startError);
+                    } finally {
+                        serviceButton.setEnabled(true);
+                        refreshState();
+                    }
+                });
+            } catch (final Throwable error) {
+                showError(error);
+                runOnUiThreadSafe(() -> serviceButton.setEnabled(true));
+            }
+        });
     }
 
     private void stopSyncService() {
-        startService(new Intent(this, TelegramSyncService.class)
-                .setAction(TelegramSyncService.ACTION_STOP));
+        try {
+            stopService(new Intent(this, TelegramSyncService.class));
+        } catch (final Throwable error) {
+            showError(error);
+        }
     }
 
     private void refreshState() {
+        if (!initialized) {
+            return;
+        }
         final boolean running = TelegramSyncService.isRunning(this);
         serviceButton.setText(running
                 ? R.string.telegram_stop_service : R.string.telegram_start_service);
@@ -205,6 +330,9 @@ public final class TelegramIntegrationActivity extends AppCompatActivity {
     }
 
     private void renderQueue() {
+        if (queueContainer == null || queueStore == null) {
+            return;
+        }
         queueContainer.removeAllViews();
         final List<TelegramQueueStore.Item> items = queueStore.list();
         if (items.isEmpty()) {
@@ -255,9 +383,18 @@ public final class TelegramIntegrationActivity extends AppCompatActivity {
     }
 
     private void openQueueItem(final TelegramQueueStore.Item item) {
-        final Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(item.url),
-                this, RouterActivity.class);
-        startActivity(intent);
+        try {
+            final Uri uri = Uri.parse(item.url);
+            if (uri.getScheme() == null
+                    || !("http".equalsIgnoreCase(uri.getScheme())
+                    || "https".equalsIgnoreCase(uri.getScheme()))) {
+                throw new IllegalArgumentException(getString(R.string.telegram_invalid_link));
+            }
+            final Intent intent = new Intent(Intent.ACTION_VIEW, uri, this, RouterActivity.class);
+            startActivity(intent);
+        } catch (final Throwable error) {
+            showError(error);
+        }
     }
 
     private void openBot() {
@@ -265,18 +402,114 @@ public final class TelegramIntegrationActivity extends AppCompatActivity {
             Toast.makeText(this, R.string.telegram_create_code_first, Toast.LENGTH_SHORT).show();
             return;
         }
-        startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(currentBotUrl)));
+        try {
+            final Uri uri = Uri.parse(currentBotUrl);
+            if (!"https".equalsIgnoreCase(uri.getScheme()) || !"t.me".equalsIgnoreCase(uri.getHost())) {
+                throw new IllegalArgumentException(getString(R.string.telegram_invalid_bot_link));
+            }
+            final Intent intent = new Intent(Intent.ACTION_VIEW, uri)
+                    .addCategory(Intent.CATEGORY_BROWSABLE);
+            if (intent.resolveActivity(getPackageManager()) == null) {
+                throw new ActivityNotFoundException(getString(R.string.telegram_no_handler));
+            }
+            startActivity(intent);
+        } catch (final Throwable error) {
+            showError(error);
+        }
+    }
+
+    private void setControlsEnabled(final boolean enabled) {
+        if (!initialized) {
+            return;
+        }
+        pairButton.setEnabled(enabled);
+        refreshButton.setEnabled(enabled);
+        unpairButton.setEnabled(enabled);
+        serviceButton.setEnabled(enabled);
+        openBotButton.setEnabled(enabled && !currentBotUrl.isEmpty());
     }
 
     private void setBusy(final String text) {
-        connectionStatus.setText(text);
+        if (connectionStatus != null) {
+            connectionStatus.setText(text);
+        }
     }
 
-    private void showError(final Exception error) {
-        final String message = error.getMessage() == null
+    private void showError(final Throwable error) {
+        final String message;
+        if (error instanceof PairingApiClient.ApiException) {
+            final PairingApiClient.ApiException apiError = (PairingApiClient.ApiException) error;
+            switch (apiError.code) {
+                case "telegram_not_configured":
+                    message = getString(R.string.telegram_bot_not_configured);
+                    break;
+                case "network_unavailable":
+                case "network_error":
+                    message = getString(R.string.telegram_network_error);
+                    break;
+                case "network_timeout":
+                    message = getString(R.string.telegram_network_timeout);
+                    break;
+                case "not_paired":
+                    message = getString(R.string.telegram_pair_before_sync);
+                    break;
+                default:
+                    message = apiError.getMessage() == null
+                            ? apiError.code : apiError.getMessage();
+                    break;
+            }
+        } else {
+            message = error.getMessage() == null || error.getMessage().trim().isEmpty()
+                    ? error.getClass().getSimpleName() : error.getMessage();
+        }
+        runOnUiThreadSafe(() -> {
+            if (connectionStatus != null) {
+                connectionStatus.setText(getString(R.string.telegram_error_format, message));
+            } else {
+                Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    private void runOnUiThreadSafe(final Runnable action) {
+        if (isFinishing() || (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1
+                && isDestroyed())) {
+            return;
+        }
+        runOnUiThread(action);
+    }
+
+    private void renderStartupFailure(final Throwable error) {
+        final LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        final int padding = dp(24);
+        root.setPadding(padding, padding, padding, padding);
+
+        final TextView title = new TextView(this);
+        title.setText(R.string.telegram_startup_error_title);
+        title.setTextSize(22f);
+        title.setTextAppearance(android.R.style.TextAppearance_Material_Headline);
+        root.addView(title);
+
+        final TextView message = new TextView(this);
+        final String details = error.getMessage() == null
                 ? error.getClass().getSimpleName() : error.getMessage();
-        runOnUiThread(() -> connectionStatus.setText(
-                getString(R.string.telegram_error_format, message)));
+        message.setText(getString(R.string.telegram_startup_error_message, details));
+        message.setPadding(0, dp(16), 0, dp(16));
+        message.setTextIsSelectable(true);
+        root.addView(message);
+
+        final Button retry = new Button(this);
+        retry.setText(R.string.telegram_retry);
+        retry.setOnClickListener(view -> recreate());
+        root.addView(retry);
+
+        final Button close = new Button(this);
+        close.setText(android.R.string.cancel);
+        close.setOnClickListener(view -> finish());
+        root.addView(close);
+
+        setContentView(root);
     }
 
     private int dp(final int value) {
