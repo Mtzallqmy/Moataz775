@@ -15,7 +15,7 @@
     <string name="telegram_clear_queue">مسح الطلبات المحلية</string>
     <string name="telegram_unpair">إلغاء ربط حساب تيليجرام</string>
     <string name="telegram_queue_section">طلبات التحميل</string>
-    <string name="telegram_queue_description">تظهر هنا الروابط المرسلة إلى البوت. افتح أي رابط لاختيار الصيغة والجودة من نظام Moataz Dow الأصلي.</string>
+    <string name="telegram_queue_description">تظهر هنا الروابط المرسلة إلى البوت. افتح أي رابط لاختيار الصيغة والجودة المتاحة داخل Moataz Dow.</string>
     <string name="telegram_not_paired">هذه النسخة غير مرتبطة بتيليجرام.</string>
     <string name="telegram_paired">تم ربط تيليجرام.</string>
     <string name="telegram_account_linked">تم ربط حساب تيليجرام</string>
@@ -25,9 +25,17 @@
     <string name="telegram_checking_pairing">جارٍ فحص حالة الربط…</string>
     <string name="telegram_unpairing">جارٍ إلغاء الربط…</string>
     <string name="telegram_bot_not_configured">لم يقم المشرف بإعداد البوت المركزي بعد.</string>
+    <string name="telegram_service_unavailable">خدمة اتصال Moataz Dow غير متاحة حاليًا.</string>
     <string name="telegram_create_code_first">أنشئ رمز اقتران أولًا.</string>
+    <string name="telegram_pair_before_sync">اربط حساب تيليجرام قبل تشغيل المزامنة.</string>
+    <string name="telegram_sync_started">تم تشغيل المزامنة بنجاح.</string>
     <string name="telegram_connecting">جارٍ الاتصال الآمن…</string>
     <string name="telegram_error_format">خطأ: %1$s</string>
+    <string name="telegram_network_error">تعذر الوصول إلى خدمة الاتصال. تحقق من اتصال الإنترنت.</string>
+    <string name="telegram_network_timeout">انتهت مهلة الاتصال. حاول مجددًا.</string>
+    <string name="telegram_invalid_link">رابط التحميل المستلم غير صالح.</string>
+    <string name="telegram_invalid_bot_link">رابط البوت الذي أعادته الخدمة غير صالح.</string>
+    <string name="telegram_no_handler">لا يوجد تطبيق تيليجرام أو متصفح قادر على فتح الرابط.</string>
     <string name="telegram_service_title">تيليجرام Moataz Dow</string>
     <string name="telegram_service_description">استقبال روابط هذا الجهاز فقط من خدمة البوت المركزية.</string>
     <string name="telegram_service_state_format">الحالة: %1$s\nآخر مزامنة: %2$s\nآخر خطأ: %3$s</string>
@@ -40,4 +48,7 @@
     <string name="telegram_queue_empty">لا توجد طلبات تحميل من تيليجرام.</string>
     <string name="telegram_open_in_app">فتح الصيغ</string>
     <string name="telegram_remove">حذف</string>
+    <string name="telegram_startup_error_title">تعذر تشغيل شاشة تيليجرام</string>
+    <string name="telegram_startup_error_message">تم احتواء خطأ داخلي بدل إغلاق التطبيق. التفاصيل: %1$s</string>
+    <string name="telegram_retry">إعادة المحاولة</string>
 </resources>
