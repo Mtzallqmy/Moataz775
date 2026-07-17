@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Apply the Moataz Dow Android overlay to a pinned NewPipe source checkout."""
+"""Apply the Moataz Dow Android overlay to the pinned application engine."""
 from __future__ import annotations
 
 import argparse
@@ -47,7 +47,7 @@ val gitWorkingBranch = providers.exec {''')
     replace_once(gradle, 'resValue("string", "app_name", "NewPipe")',
                  'resValue("string", "app_name", "Moataz Dow")\n'
                  f'        buildConfigField("String", "MOATAZ_API_BASE_URL", '
-                 f'"\\\"{escaped_api_url}\\\"")')
+                 f'"\\"{escaped_api_url}\\"")')
     replace_once(gradle, 'versionName = "0.28.8"', f'versionName = "{version}"')
     replace_once(gradle, 'resValue("string", "app_name", "NewPipe Debug")',
                  'resValue("string", "app_name", "Moataz Dow Debug")')
@@ -141,7 +141,11 @@ def patch_main_activity(source: Path) -> None:
                 NavigationHelper.openSettings(this);
                 break;''',
         '''            case ITEM_ID_TELEGRAM:
-                startActivity(new Intent(this, TelegramIntegrationActivity.class));
+                try {
+                    startActivity(new Intent(this, TelegramIntegrationActivity.class));
+                } catch (final Throwable error) {
+                    ErrorUtil.showUiErrorSnackbar(this, "Opening Telegram connection", error);
+                }
                 break;
             case ITEM_ID_SETTINGS:
                 NavigationHelper.openSettings(this);
@@ -157,7 +161,7 @@ def main() -> None:
     source = args.source.resolve()
     repository_root = Path(__file__).resolve().parents[1]
     if not (source / "app/build.gradle.kts").exists():
-        raise SystemExit(f"Not a NewPipe checkout: {source}")
+        raise SystemExit(f"Not a compatible Android source checkout: {source}")
     copy_overlay(repository_root, source)
     patch_gradle(source, args.version, args.api_base_url.rstrip("/"))
     patch_manifest(source)
