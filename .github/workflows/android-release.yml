@@ -1,4 +1,4 @@
-name: Build and release Moataz Dow
+name: Moataz Dow CI and Release
 
 on:
   push:
@@ -23,7 +23,7 @@ permissions:
   attestations: write
 
 concurrency:
-  group: moataz-dow-${{ github.ref }}
+  group: moataz-dow-ci-${{ github.workflow_ref }}-${{ github.ref }}
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 env:
@@ -105,7 +105,7 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "api_base_url=${API_BASE_URL%/}" >> "$GITHUB_OUTPUT"
 
-      - name: Fetch pinned NewPipe source
+      - name: Fetch pinned Android engine
         run: git clone --depth 1 --branch "$UPSTREAM_REF" "$UPSTREAM_REPOSITORY" build/NewPipe
 
       - name: Apply Moataz Dow overlay
@@ -143,12 +143,18 @@ jobs:
 
       - name: Build minified APKs
         working-directory: build/NewPipe
+        shell: bash
         env:
           MOATAZ_KEYSTORE_PATH: ${{ runner.temp }}/moataz-dow-release.jks
           MOATAZ_KEYSTORE_PASSWORD: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.ANDROID_KEYSTORE_PASSWORD || 'ci-password' }}
           MOATAZ_KEY_ALIAS: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.ANDROID_KEY_ALIAS || 'moataz-ci' }}
           MOATAZ_KEY_PASSWORD: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.ANDROID_KEY_PASSWORD || 'ci-password' }}
-        run: ./gradlew --no-daemon --stacktrace assembleRelease
+        run: |
+          set +e
+          ./gradlew --no-daemon --stacktrace --console=plain --warning-mode=none assembleRelease > ../../gradle-build.log 2>&1
+          STATUS=$?
+          tail -n 320 ../../gradle-build.log
+          exit "$STATUS"
 
       - name: Collect and verify APKs
         id: artifacts
