@@ -1,0 +1,201 @@
+name: Build and release Moataz Dow
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: App version without the v prefix
+        required: false
+        default: 1.0.0-dev
+      api_base_url:
+        description: HTTPS base URL for the Moataz Dow API
+        required: false
+        default: https://xfjybpzadqelzzrrdjhd.supabase.co/functions/v1/moataz-dow
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: moataz-dow-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+env:
+  UPSTREAM_REPOSITORY: https://github.com/TeamNewPipe/NewPipe.git
+  UPSTREAM_REF: v0.28.8
+  DEFAULT_API_BASE_URL: https://xfjybpzadqelzzrrdjhd.supabase.co/functions/v1/moataz-dow
+
+jobs:
+  backend-check:
+    name: Validate central bot service
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Check formatting
+        run: deno fmt --check backend/supabase/functions/moataz-dow
+
+      - name: Type-check edge function
+        run: deno check backend/supabase/functions/moataz-dow/index.ts
+
+      - name: Validate migration safety markers
+        shell: bash
+        run: |
+          set -euo pipefail
+          MIGRATION=backend/supabase/migrations/202607180001_moataz_dow.sql
+          grep -q 'enable row level security' "$MIGRATION"
+          grep -q 'revoke all.*anon, authenticated' "$MIGRATION"
+          grep -q 'moataz_dow_devices' "$MIGRATION"
+
+  build:
+    name: Build Android APKs
+    needs: backend-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout customization repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform
+        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Resolve build parameters
+        id: build_parameters
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_API_BASE_URL: ${{ inputs.api_base_url }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          elif [[ -n "$INPUT_VERSION" ]]; then
+            VERSION="$INPUT_VERSION"
+          else
+            VERSION="1.0.0-dev.${GITHUB_RUN_NUMBER}"
+          fi
+          API_BASE_URL="${INPUT_API_BASE_URL:-$DEFAULT_API_BASE_URL}"
+          [[ "$API_BASE_URL" == https://* ]] || { echo 'API URL must use HTTPS'; exit 1; }
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "api_base_url=${API_BASE_URL%/}" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch pinned NewPipe source
+        run: git clone --depth 1 --branch "$UPSTREAM_REF" "$UPSTREAM_REPOSITORY" build/NewPipe
+
+      - name: Apply Moataz Dow overlay
+        run: >-
+          python3 scripts/prepare-source.py
+          --source build/NewPipe
+          --version '${{ steps.build_parameters.outputs.version }}'
+          --api-base-url '${{ steps.build_parameters.outputs.api_base_url }}'
+
+      - name: Validate production signing secrets
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$ANDROID_KEYSTORE_BASE64" || { echo 'Missing ANDROID_KEYSTORE_BASE64'; exit 1; }
+          test -n "$ANDROID_KEYSTORE_PASSWORD" || { echo 'Missing ANDROID_KEYSTORE_PASSWORD'; exit 1; }
+          test -n "$ANDROID_KEY_ALIAS" || { echo 'Missing ANDROID_KEY_ALIAS'; exit 1; }
+          test -n "$ANDROID_KEY_PASSWORD" || { echo 'Missing ANDROID_KEY_PASSWORD'; exit 1; }
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/moataz-dow-release.jks"
+
+      - name: Create temporary CI signing key
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        run: |
+          keytool -genkeypair -noprompt \
+            -keystore "$RUNNER_TEMP/moataz-dow-release.jks" \
+            -storepass ci-password \
+            -keypass ci-password \
+            -alias moataz-ci \
+            -keyalg RSA -keysize 3072 -validity 30 \
+            -dname "CN=Moataz Dow CI,O=Moataz Dow,C=YE"
+
+      - name: Build minified APKs
+        working-directory: build/NewPipe
+        env:
+          MOATAZ_KEYSTORE_PATH: ${{ runner.temp }}/moataz-dow-release.jks
+          MOATAZ_KEYSTORE_PASSWORD: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.ANDROID_KEYSTORE_PASSWORD || 'ci-password' }}
+          MOATAZ_KEY_ALIAS: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.ANDROID_KEY_ALIAS || 'moataz-ci' }}
+          MOATAZ_KEY_PASSWORD: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.ANDROID_KEY_PASSWORD || 'ci-password' }}
+        run: ./gradlew --no-daemon --stacktrace assembleRelease
+
+      - name: Collect and verify APKs
+        id: artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=dist
+          VERSION='${{ steps.build_parameters.outputs.version }}'
+          mkdir -p "$OUT"
+          ARM64=$(find build/NewPipe/app/build/outputs/apk -type f -name '*arm64-v8a*-release.apk' | head -1)
+          UNIVERSAL=$(find build/NewPipe/app/build/outputs/apk -type f -name '*universal*-release.apk' | head -1)
+          test -f "$ARM64"
+          test -f "$UNIVERSAL"
+          cp "$ARM64" "$OUT/Moataz-Dow-${VERSION}-arm64-v8a.apk"
+          cp "$UNIVERSAL" "$OUT/Moataz-Dow-${VERSION}-universal.apk"
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)
+          "$APKSIGNER" verify --verbose --print-certs "$OUT/Moataz-Dow-${VERSION}-arm64-v8a.apk"
+          "$APKSIGNER" verify --verbose --print-certs "$OUT/Moataz-Dow-${VERSION}-universal.apk"
+          (cd "$OUT" && sha256sum *.apk > SHA256SUMS.txt)
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: moataz-dow-${{ steps.build_parameters.outputs.version }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Attest release APKs
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*.apk
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Moataz Dow ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            dist/*.apk
+            dist/SHA256SUMS.txt
+          body: |
+            ## Moataz Dow ${{ steps.build_parameters.outputs.version }}
+
+            - **arm64-v8a:** smaller APK for modern 64-bit Android devices.
+            - **universal:** compatible with all ABIs supported by this release.
+            - APKs are minified, resource-shrunk, signature-verified and accompanied by SHA-256 checksums.
+            - Build provenance is generated by GitHub Actions.
