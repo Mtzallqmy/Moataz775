@@ -7,7 +7,6 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.net.Uri;
 import android.os.Bundle;
-import android.text.InputType;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -19,10 +18,7 @@ import androidx.core.content.ContextCompat;
 import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.card.MaterialCardView;
-import com.google.android.material.textfield.TextInputEditText;
 
-import org.json.JSONArray;
-import org.json.JSONObject;
 import org.schabi.newpipe.R;
 import org.schabi.newpipe.RouterActivity;
 import org.schabi.newpipe.util.ServiceHelper;
@@ -34,20 +30,20 @@ import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
+/** User-facing pairing and diagnostics screen for the shared Moataz Dow Telegram bot. */
 public final class TelegramIntegrationActivity extends AppCompatActivity {
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
-    private SecureTokenStore tokenStore;
-    private TelegramBotClient client;
+    private DeviceIdentityStore identityStore;
+    private PairingApiClient client;
     private TelegramQueueStore queueStore;
-    private TextInputEditText tokenInput;
     private TextView connectionStatus;
-    private TextView botDetails;
-    private TextView webhookDetails;
-    private TextView commandsDetails;
+    private TextView pairCode;
+    private TextView pairedAccount;
     private TextView serviceDetails;
     private LinearLayout queueContainer;
     private MaterialButton serviceButton;
-    private String botUsername;
+    private MaterialButton openBotButton;
+    private String currentBotUrl = "";
 
     private final BroadcastReceiver stateReceiver = new BroadcastReceiver() {
         @Override
@@ -61,39 +57,34 @@ public final class TelegramIntegrationActivity extends AppCompatActivity {
         ThemeHelper.setTheme(this, ServiceHelper.getSelectedServiceId(this));
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_telegram_integration);
+
         final MaterialToolbar toolbar = findViewById(R.id.telegram_toolbar);
         toolbar.setNavigationOnClickListener(view -> finish());
 
-        tokenStore = new SecureTokenStore(this);
-        client = new TelegramBotClient();
+        identityStore = new DeviceIdentityStore(this);
+        client = new PairingApiClient();
         queueStore = new TelegramQueueStore(this);
 
-        tokenInput = findViewById(R.id.telegram_token_input);
         connectionStatus = findViewById(R.id.telegram_connection_status);
-        botDetails = findViewById(R.id.telegram_bot_details);
-        webhookDetails = findViewById(R.id.telegram_webhook_details);
-        commandsDetails = findViewById(R.id.telegram_commands_details);
+        pairCode = findViewById(R.id.telegram_pair_code);
+        pairedAccount = findViewById(R.id.telegram_paired_account);
         serviceDetails = findViewById(R.id.telegram_service_details);
         queueContainer = findViewById(R.id.telegram_queue_container);
         serviceButton = findViewById(R.id.telegram_service_button);
+        openBotButton = findViewById(R.id.telegram_open_bot_button);
 
-        final MaterialButton visibilityButton = findViewById(R.id.telegram_token_visibility_button);
-        visibilityButton.setOnClickListener(view -> toggleTokenVisibility(visibilityButton));
-        findViewById(R.id.telegram_save_button).setOnClickListener(view -> saveToken());
-        findViewById(R.id.telegram_test_button).setOnClickListener(view -> testConnection());
-        findViewById(R.id.telegram_commands_button).setOnClickListener(view -> syncCommands());
-        findViewById(R.id.telegram_open_bot_button).setOnClickListener(view -> openBot());
-        findViewById(R.id.telegram_clear_button).setOnClickListener(view -> clearConfiguration());
+        findViewById(R.id.telegram_pair_button).setOnClickListener(view -> createPairing());
+        findViewById(R.id.telegram_refresh_button).setOnClickListener(view -> refreshPairing());
+        findViewById(R.id.telegram_unpair_button).setOnClickListener(view -> unpair());
         findViewById(R.id.telegram_clear_queue_button).setOnClickListener(view -> {
             queueStore.clear();
             renderQueue();
         });
+        openBotButton.setOnClickListener(view -> openBot());
         serviceButton.setOnClickListener(view -> toggleService());
 
-        if (tokenStore.hasToken()) {
-            tokenInput.setHint(R.string.telegram_token_saved_hint);
-        }
         refreshState();
+        refreshPairing();
     }
 
     @Override
@@ -111,21 +102,28 @@ public final class TelegramIntegrationActivity extends AppCompatActivity {
         super.onStop();
     }
 
-    private void saveToken() {
-        final String entered = textOf(tokenInput);
-        if (entered.isEmpty()) {
-            Toast.makeText(this, tokenStore.hasToken()
-                    ? R.string.telegram_token_already_saved : R.string.telegram_token_required,
-                    Toast.LENGTH_SHORT).show();
-            return;
-        }
+    private PairingApiClient.Identity identity() throws Exception {
+        return new PairingApiClient.Identity(identityStore.getOrCreateDeviceId(),
+                identityStore.getOrCreateDeviceSecret());
+    }
+
+    private void createPairing() {
+        setBusy(getString(R.string.telegram_creating_pair_code));
         executor.execute(() -> {
             try {
-                tokenStore.save(entered);
+                final PairingApiClient.Identity identity = identity();
+                client.register(identity);
+                final PairingApiClient.PairCode result = client.createPairCode(identity);
+                currentBotUrl = result.botUrl;
                 runOnUiThread(() -> {
-                    tokenInput.setText("");
-                    tokenInput.setHint(R.string.telegram_token_saved_hint);
-                    connectionStatus.setText(R.string.telegram_token_saved_securely);
+                    pairCode.setText(result.code);
+                    openBotButton.setEnabled(!currentBotUrl.isEmpty());
+                    connectionStatus.setText(R.string.telegram_pair_code_ready);
+                    if (currentBotUrl.isEmpty()) {
+                        connectionStatus.setText(R.string.telegram_bot_not_configured);
+                    } else {
+                        openBot();
+                    }
                 });
             } catch (final Exception error) {
                 showError(error);
@@ -133,30 +131,41 @@ public final class TelegramIntegrationActivity extends AppCompatActivity {
         });
     }
 
-    private void testConnection() {
-        setBusy(getString(R.string.telegram_testing_connection));
+    private void refreshPairing() {
+        setBusy(getString(R.string.telegram_checking_pairing));
         executor.execute(() -> {
             try {
-                final String token = resolveToken();
-                final JSONObject bot = client.getMe(token);
-                final JSONObject webhook = client.getWebhookInfo(token);
-                final JSONArray commands = client.getMyCommands(token);
-                botUsername = bot.optString("username", "");
-                final String botText = getString(R.string.telegram_bot_details_format,
-                        bot.optLong("id"), bot.optString("first_name", ""),
-                        botUsername.isEmpty() ? "—" : "@" + botUsername,
-                        bot.optBoolean("can_join_groups"), bot.optBoolean("supports_inline_queries"));
-                final String webhookUrl = webhook.optString("url", "");
-                final String webhookText = webhookUrl.isEmpty()
-                        ? getString(R.string.telegram_webhook_disabled)
-                        : getString(R.string.telegram_webhook_enabled, webhookUrl,
-                                webhook.optInt("pending_update_count", 0));
-                final String commandText = formatCommands(commands);
+                final PairingApiClient.Identity identity = identity();
+                client.register(identity);
+                final PairingApiClient.PairStatus status = client.status(identity);
                 runOnUiThread(() -> {
-                    connectionStatus.setText(R.string.telegram_connected);
-                    botDetails.setText(botText);
-                    webhookDetails.setText(webhookText);
-                    commandsDetails.setText(commandText);
+                    if (status.paired) {
+                        connectionStatus.setText(R.string.telegram_paired);
+                        pairedAccount.setText(status.telegramUsername.isEmpty()
+                                ? getString(R.string.telegram_account_linked)
+                                : "@" + status.telegramUsername);
+                    } else {
+                        connectionStatus.setText(R.string.telegram_not_paired);
+                        pairedAccount.setText(R.string.telegram_no_account);
+                    }
+                });
+            } catch (final Exception error) {
+                showError(error);
+            }
+        });
+    }
+
+    private void unpair() {
+        setBusy(getString(R.string.telegram_unpairing));
+        executor.execute(() -> {
+            try {
+                client.unpair(identity());
+                stopSyncService();
+                runOnUiThread(() -> {
+                    currentBotUrl = "";
+                    pairCode.setText("—");
+                    pairedAccount.setText(R.string.telegram_no_account);
+                    connectionStatus.setText(R.string.telegram_unpaired);
                     refreshState();
                 });
             } catch (final Exception error) {
@@ -165,52 +174,10 @@ public final class TelegramIntegrationActivity extends AppCompatActivity {
         });
     }
 
-    private void syncCommands() {
-        setBusy(getString(R.string.telegram_syncing_commands));
-        executor.execute(() -> {
-            try {
-                final String token = resolveToken();
-                client.setDefaultCommands(token);
-                final JSONArray commands = client.getMyCommands(token);
-                runOnUiThread(() -> {
-                    connectionStatus.setText(R.string.telegram_commands_synced);
-                    commandsDetails.setText(formatCommands(commands));
-                });
-            } catch (final Exception error) {
-                showError(error);
-            }
-        });
-    }
-
-    private String resolveToken() throws Exception {
-        final String entered = textOf(tokenInput);
-        if (!entered.isEmpty()) {
-            tokenStore.save(entered);
-            runOnUiThread(() -> {
-                tokenInput.setText("");
-                tokenInput.setHint(R.string.telegram_token_saved_hint);
-            });
-            return entered;
-        }
-        final String saved = tokenStore.read();
-        if (saved == null) {
-            throw new IllegalStateException(getString(R.string.telegram_token_required));
-        }
-        return saved;
-    }
-
     private void toggleService() {
         if (TelegramSyncService.isRunning(this)) {
-            startService(new Intent(this, TelegramSyncService.class)
-                    .setAction(TelegramSyncService.ACTION_STOP));
+            stopSyncService();
         } else {
-            if (!tokenStore.hasToken() && textOf(tokenInput).isEmpty()) {
-                Toast.makeText(this, R.string.telegram_token_required, Toast.LENGTH_SHORT).show();
-                return;
-            }
-            if (!textOf(tokenInput).isEmpty()) {
-                saveToken();
-            }
             ContextCompat.startForegroundService(this,
                     new Intent(this, TelegramSyncService.class)
                             .setAction(TelegramSyncService.ACTION_START));
@@ -218,31 +185,17 @@ public final class TelegramIntegrationActivity extends AppCompatActivity {
         refreshState();
     }
 
-    private void clearConfiguration() {
+    private void stopSyncService() {
         startService(new Intent(this, TelegramSyncService.class)
                 .setAction(TelegramSyncService.ACTION_STOP));
-        tokenStore.clear();
-        queueStore.clear();
-        tokenInput.setText("");
-        tokenInput.setHint(R.string.telegram_bot_token_hint);
-        botUsername = null;
-        connectionStatus.setText(R.string.telegram_not_configured);
-        botDetails.setText("—");
-        webhookDetails.setText("—");
-        commandsDetails.setText("—");
-        refreshState();
     }
 
     private void refreshState() {
         final boolean running = TelegramSyncService.isRunning(this);
         serviceButton.setText(running
                 ? R.string.telegram_stop_service : R.string.telegram_start_service);
-        final String name = TelegramSyncService.getBotName(this);
         final String error = TelegramSyncService.getLastError(this);
         final long lastSync = TelegramSyncService.getLastSync(this);
-        if (!name.isEmpty()) {
-            botUsername = name;
-        }
         final String lastSyncText = lastSync <= 0 ? getString(R.string.telegram_never)
                 : DateFormat.getDateTimeInstance().format(new Date(lastSync));
         serviceDetails.setText(getString(R.string.telegram_service_state_format,
@@ -308,36 +261,11 @@ public final class TelegramIntegrationActivity extends AppCompatActivity {
     }
 
     private void openBot() {
-        final String username = botUsername == null ? "" : botUsername.replace("@", "");
-        if (username.isEmpty()) {
-            Toast.makeText(this, R.string.telegram_test_first, Toast.LENGTH_SHORT).show();
+        if (currentBotUrl.isEmpty()) {
+            Toast.makeText(this, R.string.telegram_create_code_first, Toast.LENGTH_SHORT).show();
             return;
         }
-        startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me/" + username)));
-    }
-
-    private void toggleTokenVisibility(final MaterialButton button) {
-        final boolean visible = tokenInput.getInputType() == InputType.TYPE_CLASS_TEXT;
-        tokenInput.setInputType(visible
-                ? InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD
-                : InputType.TYPE_CLASS_TEXT);
-        tokenInput.setSelection(tokenInput.length());
-        button.setText(visible ? R.string.telegram_show_token : R.string.telegram_hide_token);
-    }
-
-    private String formatCommands(final JSONArray commands) {
-        if (commands.length() == 0) {
-            return getString(R.string.telegram_no_commands);
-        }
-        final StringBuilder builder = new StringBuilder();
-        for (int i = 0; i < commands.length(); i++) {
-            final JSONObject command = commands.optJSONObject(i);
-            if (command != null) {
-                builder.append('/').append(command.optString("command"))
-                        .append(" — ").append(command.optString("description")).append('\n');
-            }
-        }
-        return builder.toString().trim();
+        startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(currentBotUrl)));
     }
 
     private void setBusy(final String text) {
@@ -349,10 +277,6 @@ public final class TelegramIntegrationActivity extends AppCompatActivity {
                 ? error.getClass().getSimpleName() : error.getMessage();
         runOnUiThread(() -> connectionStatus.setText(
                 getString(R.string.telegram_error_format, message)));
-    }
-
-    private static String textOf(final TextInputEditText input) {
-        return input.getText() == null ? "" : input.getText().toString().trim();
     }
 
     private int dp(final int value) {
