@@ -1,4 +1,9 @@
-import { TELEGRAM_BOT_USERNAME, db } from "./_shared/config.ts";
+import {
+  TELEGRAM_BOT_TOKEN,
+  TELEGRAM_BOT_USERNAME,
+  TELEGRAM_WEBHOOK_SECRET,
+  db,
+} from "./_shared/config.ts";
 import {
   audit,
   authenticateDevice,
@@ -48,6 +53,14 @@ export async function handleDevice(
   if (!device) return json({ error: "invalid_device_credentials" }, 401);
 
   if (path === "/v1/pair/code" && req.method === "POST") {
+    const username = TELEGRAM_BOT_USERNAME.replace(/^@/, "").trim();
+    if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_WEBHOOK_SECRET || !username) {
+      return json({
+        error: "telegram_not_configured",
+        message: "The central Telegram bot is not configured yet",
+      }, 503);
+    }
+
     await db.from("moataz_dow_pair_codes")
       .delete()
       .eq("device_id", device.device_id)
@@ -68,15 +81,12 @@ export async function handleDevice(
     });
     if (error) throw error;
 
-    const username = TELEGRAM_BOT_USERNAME.replace(/^@/, "");
     return json({
       ok: true,
       code,
       expires_at: expires,
       bot_username: username,
-      bot_url: username
-        ? `https://t.me/${username}?start=${code}`
-        : "",
+      bot_url: `https://t.me/${username}?start=${code}`,
     });
   }
 
