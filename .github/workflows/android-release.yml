@@ -142,6 +142,8 @@ jobs:
             -dname "CN=Moataz Dow CI,O=Moataz Dow,C=YE"
 
       - name: Build minified APKs
+        id: android_build
+        continue-on-error: true
         working-directory: build/NewPipe
         shell: bash
         env:
@@ -153,8 +155,21 @@ jobs:
           set +e
           ./gradlew --no-daemon --stacktrace --console=plain --warning-mode=none assembleRelease > ../../gradle-build.log 2>&1
           STATUS=$?
-          tail -n 320 ../../gradle-build.log
+          tail -n 160 ../../gradle-build.log
           exit "$STATUS"
+
+      - name: Upload Gradle diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-diagnostics-${{ github.run_id }}
+          path: gradle-build.log
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Stop after failed Android build
+        if: steps.android_build.outcome == 'failure'
+        run: exit 1
 
       - name: Collect and verify APKs
         id: artifacts
