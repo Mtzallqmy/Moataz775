@@ -6,6 +6,10 @@ import argparse
 import shutil
 from pathlib import Path
 
+DEFAULT_API_BASE_URL = (
+    "https://xfjybpzadqelzzrrdjhd.supabase.co/functions/v1/moataz-dow"
+)
+
 
 def replace_once(path: Path, old: str, new: str) -> None:
     text = path.read_text(encoding="utf-8")
@@ -25,7 +29,10 @@ def copy_overlay(repository_root: Path, source: Path) -> None:
         shutil.copy2(item, destination)
 
 
-def patch_gradle(source: Path, version: str) -> None:
+def patch_gradle(source: Path, version: str, api_base_url: str) -> None:
+    if not api_base_url.startswith("https://"):
+        raise ValueError("The production API base URL must use HTTPS")
+    escaped_api_url = api_base_url.replace("\\", "\\\\").replace('"', '\\"')
     gradle = source / "app/build.gradle.kts"
     replace_once(gradle,
         'val gitWorkingBranch = providers.exec {',
@@ -38,7 +45,9 @@ val gitWorkingBranch = providers.exec {''')
     replace_once(gradle, 'applicationId = "org.schabi.newpipe"',
                  'applicationId = "com.moataz.dow"')
     replace_once(gradle, 'resValue("string", "app_name", "NewPipe")',
-                 'resValue("string", "app_name", "Moataz Dow")')
+                 'resValue("string", "app_name", "Moataz Dow")\n'
+                 f'        buildConfigField("String", "MOATAZ_API_BASE_URL", '
+                 f'"\\\"{escaped_api_url}\\\"")')
     replace_once(gradle, 'versionName = "0.28.8"', f'versionName = "{version}"')
     replace_once(gradle, 'resValue("string", "app_name", "NewPipe Debug")',
                  'resValue("string", "app_name", "Moataz Dow Debug")')
@@ -143,13 +152,14 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", required=True, type=Path)
     parser.add_argument("--version", required=True)
+    parser.add_argument("--api-base-url", default=DEFAULT_API_BASE_URL)
     args = parser.parse_args()
     source = args.source.resolve()
     repository_root = Path(__file__).resolve().parents[1]
     if not (source / "app/build.gradle.kts").exists():
         raise SystemExit(f"Not a NewPipe checkout: {source}")
     copy_overlay(repository_root, source)
-    patch_gradle(source, args.version)
+    patch_gradle(source, args.version, args.api_base_url.rstrip("/"))
     patch_manifest(source)
     patch_main_activity(source)
     print(f"Moataz Dow overlay applied to {source}")
