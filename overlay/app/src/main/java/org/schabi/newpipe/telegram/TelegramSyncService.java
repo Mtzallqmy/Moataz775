@@ -9,7 +9,6 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.net.Uri;
 import android.os.Build;
 import android.os.IBinder;
 
@@ -20,12 +19,10 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 import org.schabi.newpipe.R;
 
-import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
+/** Pulls only this installation's tasks from the central Moataz Dow service. */
 public final class TelegramSyncService extends Service {
     public static final String ACTION_START = "org.moatazdow.telegram.START";
     public static final String ACTION_STOP = "org.moatazdow.telegram.STOP";
@@ -34,26 +31,24 @@ public final class TelegramSyncService extends Service {
     private static final String CHANNEL_ID = "moataz_dow_telegram_sync";
     private static final int NOTIFICATION_ID = 77549;
     private static final String PREFS = "moataz_dow_telegram_state";
-    private static final String KEY_OFFSET = "offset";
     private static final String KEY_RUNNING = "running";
     private static final String KEY_LAST_ERROR = "last_error";
-    private static final String KEY_BOT_NAME = "bot_name";
     private static final String KEY_LAST_SYNC = "last_sync";
-    private static final Pattern URL_PATTERN = Pattern.compile("https?://\\S+", Pattern.CASE_INSENSITIVE);
+    private static final long POLL_INTERVAL_MS = 15000L;
 
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private volatile boolean shouldRun;
-    private TelegramBotClient client;
+    private PairingApiClient client;
     private TelegramQueueStore queueStore;
-    private SecureTokenStore tokenStore;
+    private DeviceIdentityStore identityStore;
     private SharedPreferences state;
 
     @Override
     public void onCreate() {
         super.onCreate();
-        client = new TelegramBotClient();
+        client = new PairingApiClient();
         queueStore = new TelegramQueueStore(this);
-        tokenStore = new SecureTokenStore(this);
+        identityStore = new DeviceIdentityStore(this);
         state = getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         createNotificationChannel();
     }
@@ -67,44 +62,65 @@ public final class TelegramSyncService extends Service {
         if (!shouldRun) {
             shouldRun = true;
             state.edit().putBoolean(KEY_RUNNING, true).remove(KEY_LAST_ERROR).apply();
-            startForeground(NOTIFICATION_ID, buildNotification(getString(R.string.telegram_connecting)));
+            startForeground(NOTIFICATION_ID,
+                    buildNotification(getString(R.string.telegram_connecting)));
             broadcastState();
             executor.execute(this::pollLoop);
         }
         return START_STICKY;
     }
 
+    private PairingApiClient.Identity identity() throws Exception {
+        return new PairingApiClient.Identity(identityStore.getOrCreateDeviceId(),
+                identityStore.getOrCreateDeviceSecret());
+    }
+
     private void pollLoop() {
         try {
-            final String token = tokenStore.read();
-            if (token == null) {
-                throw new IllegalStateException(getString(R.string.telegram_token_required));
-            }
-            final JSONObject bot = client.getMe(token);
-            final String botName = bot.optString("username", bot.optString("first_name", "Telegram bot"));
-            state.edit().putString(KEY_BOT_NAME, botName).apply();
-
-            final JSONObject webhook = client.getWebhookInfo(token);
-            if (!webhook.optString("url", "").isEmpty()) {
-                throw new IllegalStateException(getString(R.string.telegram_webhook_conflict));
-            }
-
-            updateNotification("@" + botName + " • " + getString(R.string.telegram_connected));
-            long offset = state.getLong(KEY_OFFSET, 0L);
+            final PairingApiClient.Identity identity = identity();
+            client.register(identity);
             while (shouldRun) {
-                final JSONArray updates = client.getUpdates(token, offset);
-                for (int i = 0; i < updates.length(); i++) {
-                    final JSONObject update = updates.getJSONObject(i);
-                    offset = Math.max(offset, update.optLong("update_id", 0L) + 1L);
-                    processUpdate(token, update);
+                try {
+                    final PairingApiClient.PairStatus pairStatus = client.status(identity);
+                    if (!pairStatus.paired) {
+                        throw new IllegalStateException(getString(R.string.telegram_not_paired));
+                    }
+                    final JSONArray tasks = client.tasks(identity);
+                    int received = 0;
+                    if (tasks != null) {
+                        for (int i = 0; i < tasks.length(); i++) {
+                            final JSONObject task = tasks.getJSONObject(i);
+                            final String taskId = task.optString("id");
+                            try {
+                                final String type = task.optString("task_type");
+                                final JSONObject payload = task.optJSONObject("payload");
+                                final String url = payload == null ? "" : payload.optString("url");
+                                if (!"url".equals(type) || url.isEmpty()) {
+                                    throw new IllegalArgumentException("Unsupported Telegram task");
+                                }
+                                queueStore.add(url, 0L);
+                                client.acknowledge(identity, taskId, true, null);
+                                received++;
+                            } catch (final Exception taskError) {
+                                client.acknowledge(identity, taskId, false, safeMessage(taskError));
+                            }
+                        }
+                    }
+                    state.edit().putLong(KEY_LAST_SYNC, System.currentTimeMillis())
+                            .remove(KEY_LAST_ERROR).apply();
+                    updateNotification(getString(R.string.telegram_queue_count,
+                            queueStore.list().size()));
+                    if (received > 0) {
+                        broadcastState();
+                    }
+                } catch (final Exception error) {
+                    state.edit().putString(KEY_LAST_ERROR, safeMessage(error)).apply();
+                    updateNotification(getString(R.string.telegram_sync_error));
+                    broadcastState();
                 }
-                state.edit().putLong(KEY_OFFSET, offset)
-                        .putLong(KEY_LAST_SYNC, System.currentTimeMillis())
-                        .remove(KEY_LAST_ERROR)
-                        .apply();
-                updateNotification("@" + botName + " • "
-                        + getString(R.string.telegram_queue_count, queueStore.list().size()));
-                broadcastState();
+                if (!sleepUntilNextPoll()) {
+                    break;
+                }
             }
         } catch (final Exception error) {
             state.edit().putString(KEY_LAST_ERROR, safeMessage(error)).apply();
@@ -123,74 +139,14 @@ public final class TelegramSyncService extends Service {
         }
     }
 
-    private void processUpdate(final String token, final JSONObject update) throws Exception {
-        JSONObject message = update.optJSONObject("message");
-        if (message == null) {
-            message = update.optJSONObject("edited_message");
+    private boolean sleepUntilNextPoll() {
+        try {
+            Thread.sleep(POLL_INTERVAL_MS);
+            return shouldRun;
+        } catch (final InterruptedException ignored) {
+            Thread.currentThread().interrupt();
+            return false;
         }
-        if (message == null) {
-            return;
-        }
-        final JSONObject chat = message.optJSONObject("chat");
-        if (chat == null) {
-            return;
-        }
-        final long chatId = chat.optLong("id", 0L);
-
-        final JSONObject document = message.optJSONObject("document");
-        final JSONObject audio = message.optJSONObject("audio");
-        final JSONObject video = message.optJSONObject("video");
-        final JSONObject media = document != null ? document : (audio != null ? audio : video);
-        if (media != null) {
-            final String fileId = media.optString("file_id", "");
-            final String fileName = media.optString("file_name",
-                    audio != null ? "telegram-audio.mp3" : "telegram-video.mp4");
-            final JSONObject file = client.getFile(token, fileId);
-            final Uri saved = client.downloadTelegramFile(this, token,
-                    file.getString("file_path"), fileName);
-            client.sendMessage(token, chatId,
-                    getString(R.string.telegram_file_saved, fileName, saved.toString()));
-            return;
-        }
-
-        final String rawText = message.optString("text", message.optString("caption", "")).trim();
-        if (rawText.isEmpty()) {
-            return;
-        }
-        final String commandText = rawText.replaceFirst("^/([a-zA-Z]+)@[^\\s]+", "/$1");
-        final String lower = commandText.toLowerCase(Locale.ROOT);
-        if (lower.startsWith("/start") || lower.startsWith("/help")) {
-            client.sendMessage(token, chatId, helpText());
-            return;
-        }
-        if (lower.startsWith("/formats")) {
-            client.sendMessage(token, chatId, getString(R.string.telegram_formats_reply));
-            return;
-        }
-        if (lower.startsWith("/status")) {
-            client.sendMessage(token, chatId,
-                    getString(R.string.telegram_status_reply, queueStore.list().size()));
-            return;
-        }
-
-        final Matcher matcher = URL_PATTERN.matcher(commandText);
-        if (lower.startsWith("/download") || matcher.find()) {
-            matcher.reset();
-            if (!matcher.find()) {
-                client.sendMessage(token, chatId, getString(R.string.telegram_download_usage));
-                return;
-            }
-            final String url = matcher.group().replaceAll("[),.;]+$", "");
-            queueStore.add(url, chatId);
-            client.sendMessage(token, chatId, getString(R.string.telegram_added_to_queue, url));
-            broadcastState();
-            return;
-        }
-        client.sendMessage(token, chatId, getString(R.string.telegram_unknown_command));
-    }
-
-    private String helpText() {
-        return getString(R.string.telegram_help_reply);
     }
 
     private void stopSync() {
@@ -255,11 +211,6 @@ public final class TelegramSyncService extends Service {
     public static String getLastError(final Context context) {
         return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .getString(KEY_LAST_ERROR, "");
-    }
-
-    public static String getBotName(final Context context) {
-        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .getString(KEY_BOT_NAME, "");
     }
 
     public static long getLastSync(final Context context) {
