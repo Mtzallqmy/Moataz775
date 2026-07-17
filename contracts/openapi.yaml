@@ -1,0 +1,93 @@
+openapi: 3.1.0
+info:
+  title: Moataz Dow Central Service
+  version: 1.0.0
+  description: Device pairing, task delivery, Telegram webhook and administrator APIs.
+servers:
+  - url: https://xfjybpzadqelzzrrdjhd.supabase.co/functions/v1/moataz-dow
+paths:
+  /health:
+    get:
+      operationId: health
+      responses:
+        '200':
+          description: Service status
+  /v1/device/register:
+    post:
+      operationId: registerDevice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [device_id, device_secret]
+              properties:
+                device_id: { type: string, minLength: 16, maxLength: 128 }
+                device_secret: { type: string, minLength: 32 }
+      responses:
+        '201': { description: Registered }
+        '409': { description: Identity conflict }
+  /v1/pair/code:
+    post:
+      operationId: createPairCode
+      security: [{ deviceIdentity: [] }]
+      responses:
+        '200':
+          description: Short-lived Telegram deep link
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code: { type: string }
+                  expires_at: { type: string, format: date-time }
+                  bot_username: { type: string }
+                  bot_url: { type: string, format: uri }
+  /v1/device/status:
+    get:
+      operationId: deviceStatus
+      security: [{ deviceIdentity: [] }]
+      responses:
+        '200': { description: Pairing state }
+  /v1/device/tasks:
+    get:
+      operationId: deviceTasks
+      security: [{ deviceIdentity: [] }]
+      responses:
+        '200': { description: Pending device-scoped tasks }
+  /v1/device/ack:
+    post:
+      operationId: acknowledgeTask
+      security: [{ deviceIdentity: [] }]
+      responses:
+        '200': { description: Task acknowledged }
+  /v1/device/unpair:
+    post:
+      operationId: unpairDevice
+      security: [{ deviceIdentity: [] }]
+      responses:
+        '200': { description: Telegram account disconnected }
+  /telegram/webhook:
+    post:
+      operationId: telegramWebhook
+      security: [{ telegramWebhook: [] }]
+      responses:
+        '200': { description: Update accepted }
+        '401': { description: Invalid Telegram secret token }
+  /admin:
+    get:
+      operationId: adminDashboard
+      responses:
+        '200': { description: Administrator HTML dashboard }
+components:
+  securitySchemes:
+    deviceIdentity:
+      type: apiKey
+      in: header
+      name: X-Device-ID
+      description: Also requires X-Device-Secret.
+    telegramWebhook:
+      type: apiKey
+      in: header
+      name: X-Telegram-Bot-Api-Secret-Token
