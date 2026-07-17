@@ -1,13 +1,13 @@
 # Moataz Dow
 
-**Moataz Dow** is a modern Android media browser and downloader based on NewPipe, with a secure central Telegram bot, device pairing, and an administrator dashboard.
+**Moataz Dow** is a modern Android media browser and downloader with a secure central Telegram bot, device pairing, and an administrator dashboard.
 
-> Independent GPL project. Not affiliated with NewPipe, YouTube, Supabase, or Telegram.
+> Independent GPL project. Not affiliated with YouTube, Supabase, or Telegram.
 
 ## Highlights
 
 - New Android identity, icon, package ID, Arabic interface and modern Telegram screen.
-- NewPipe playback, background audio, playlists, supported services, subtitles and native format selection.
+- Video playback, background audio, playlists, supported services, subtitles and native format selection.
 - One central Telegram bot for all users; users never paste or receive the bot token.
 - One-tap pairing through a short-lived Telegram `start` code.
 - Anonymous installation identity and random device secret protected by Android Keystore.
@@ -26,11 +26,11 @@
 backend/supabase/functions/      Central bot API, webhook and admin dashboard
 backend/supabase/migrations/     Isolated database schema, indexes and RLS
 contracts/                       API and security documentation
-overlay/                         Maintained Android source overlay for NewPipe
+overlay/                         Maintained Android source overlay
 scripts/                         Reproducible source preparation
 ```
 
-The Android source is maintained as a reviewed overlay. GitHub Actions checks out the pinned official NewPipe release, applies Moataz Dow changes, validates the backend, builds release APKs, verifies signatures and creates checksums.
+The Android source is maintained as a reviewed overlay. GitHub Actions retrieves the pinned application engine, applies Moataz Dow changes, validates the backend, builds release APKs, verifies signatures and creates checksums.
 
 ## Telegram user flow
 
@@ -55,16 +55,9 @@ The health endpoint is `/health`; the administrator interface is `/admin`. Bot a
 
 See [backend documentation](backend/README.md), [Telegram flow](docs/TELEGRAM.md), [architecture](docs/ARCHITECTURE.md), and [security model](SECURITY.md).
 
-## Local Android build
+## Building Android releases
 
-```bash
-git clone --depth 1 --branch v0.28.8 https://github.com/TeamNewPipe/NewPipe.git build/NewPipe
-python3 scripts/prepare-source.py --source build/NewPipe --version 1.0.0
-cd build/NewPipe
-./gradlew assembleRelease
-```
-
-A signing key must be supplied through the documented environment variables for an installable production release.
+GitHub Actions performs the reproducible Android build automatically. Development builds use a temporary CI key. Tagged production releases require the private signing secrets listed below.
 
 ## Release signing
 
