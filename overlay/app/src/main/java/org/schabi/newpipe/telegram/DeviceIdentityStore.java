@@ -13,7 +13,7 @@ import java.util.UUID;
  * The random device secret is protected by Android Keystore through SecureTokenStore.
  */
 public final class DeviceIdentityStore {
-    private static final String PREFS = "moataz_dow_device_identity";
+    private static final String PREFS = "moataz_dow_device_identity_v2";
     private static final String KEY_DEVICE_ID = "device_id";
 
     private final SharedPreferences preferences;
@@ -25,29 +25,52 @@ public final class DeviceIdentityStore {
         secretStore = new SecureTokenStore(app);
     }
 
-    public synchronized String getOrCreateDeviceId() {
-        String value = preferences.getString(KEY_DEVICE_ID, null);
-        if (value == null || value.isEmpty()) {
-            value = UUID.randomUUID().toString().replace("-", "");
-            preferences.edit().putString(KEY_DEVICE_ID, value).commit();
+    /**
+     * Returns a complete identity atomically. If Android Keystore data became unreadable after an
+     * upgrade, restore, or device security change, both parts are regenerated together so the app
+     * never sends an old device id with a different secret.
+     */
+    public synchronized PairingApiClient.Identity getOrCreateIdentity() throws Exception {
+        String deviceId = preferences.getString(KEY_DEVICE_ID, null);
+        String deviceSecret;
+        try {
+            deviceSecret = secretStore.read();
+        } catch (final Exception unreadableSecret) {
+            clear();
+            deviceId = null;
+            deviceSecret = null;
         }
-        return value;
+
+        if (deviceId == null || deviceId.isEmpty() || deviceSecret == null
+                || deviceSecret.length() < 32) {
+            deviceId = UUID.randomUUID().toString().replace("-", "");
+            final byte[] random = new byte[48];
+            new SecureRandom().nextBytes(random);
+            deviceSecret = Base64.encodeToString(random,
+                    Base64.URL_SAFE | Base64.NO_WRAP | Base64.NO_PADDING);
+
+            secretStore.clear();
+            secretStore.save(deviceSecret);
+            final boolean saved = preferences.edit().putString(KEY_DEVICE_ID, deviceId).commit();
+            if (!saved) {
+                secretStore.clear();
+                throw new IllegalStateException("Unable to persist the device identity");
+            }
+        }
+
+        return new PairingApiClient.Identity(deviceId, deviceSecret);
+    }
+
+    public synchronized String getOrCreateDeviceId() throws Exception {
+        return getOrCreateIdentity().deviceId;
     }
 
     public synchronized String getOrCreateDeviceSecret() throws Exception {
-        String value = secretStore.read();
-        if (value == null || value.isEmpty()) {
-            final byte[] random = new byte[48];
-            new SecureRandom().nextBytes(random);
-            value = Base64.encodeToString(random,
-                    Base64.URL_SAFE | Base64.NO_WRAP | Base64.NO_PADDING);
-            secretStore.save(value);
-        }
-        return value;
+        return getOrCreateIdentity().deviceSecret;
     }
 
     public synchronized void clear() {
-        preferences.edit().clear().apply();
+        preferences.edit().clear().commit();
         secretStore.clear();
     }
 }
