@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="telegram_integration_title">Telegram connection</string>
+    <string name="telegram_pairing_section">Connect your Telegram account</string>
+    <string name="telegram_pairing_description">Moataz Dow uses one official bot. Create a temporary code, open Telegram, and press Start. No bot token is required on this device.</string>
+    <string name="telegram_pair_code_label">Temporary pairing code</string>
+    <string name="telegram_paired_account_label">Connected Telegram account</string>
+    <string name="telegram_no_account">No account connected</string>
+    <string name="telegram_pair_now">Connect through Telegram</string>
+    <string name="telegram_refresh_status">Refresh status</string>
+    <string name="telegram_open_bot">Open bot</string>
+    <string name="telegram_sync_section">Device synchronization</string>
+    <string name="telegram_start_service">Start synchronization</string>
+    <string name="telegram_stop_service">Stop synchronization</string>
+    <string name="telegram_clear_queue">Clear local requests</string>
+    <string name="telegram_unpair">Disconnect Telegram account</string>
+    <string name="telegram_queue_section">Download requests</string>
+    <string name="telegram_queue_description">Links sent to the bot appear here. Open one to use Moataz Dow’s native format and quality selector.</string>
+    <string name="telegram_not_paired">This installation is not connected to Telegram.</string>
+    <string name="telegram_paired">Telegram is connected.</string>
+    <string name="telegram_account_linked">Telegram account connected</string>
+    <string name="telegram_unpaired">Telegram account disconnected.</string>
+    <string name="telegram_creating_pair_code">Creating a secure pairing code…</string>
+    <string name="telegram_pair_code_ready">Pairing code created. Complete the connection in Telegram.</string>
+    <string name="telegram_checking_pairing">Checking connection status…</string>
+    <string name="telegram_unpairing">Disconnecting Telegram…</string>
+    <string name="telegram_bot_not_configured">The central bot has not been configured by the administrator yet.</string>
+    <string name="telegram_create_code_first">Create a pairing code first.</string>
+    <string name="telegram_connecting">Connecting securely…</string>
+    <string name="telegram_error_format">Error: %1$s</string>
+    <string name="telegram_service_title">Moataz Dow Telegram</string>
+    <string name="telegram_service_description">Receives this device’s queued Telegram links from the central service.</string>
+    <string name="telegram_service_state_format">State: %1$s\nLast sync: %2$s\nLast error: %3$s</string>
+    <string name="telegram_running">Running</string>
+    <string name="telegram_stopped">Stopped</string>
+    <string name="telegram_never">Never</string>
+    <string name="telegram_no_errors">None</string>
+    <string name="telegram_sync_error">Connection will retry automatically.</string>
+    <string name="telegram_queue_count">%1$d queued request(s)</string>
+    <string name="telegram_queue_empty">No Telegram download requests.</string>
+    <string name="telegram_open_in_app">Open formats</string>
+    <string name="telegram_remove">Remove</string>
+</resources>
