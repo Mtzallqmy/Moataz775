@@ -1,5 +1,11 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { PUBLIC_API_URL, jsonHeaders } from "./_shared/config.ts";
+import {
+  PUBLIC_API_URL,
+  TELEGRAM_BOT_TOKEN,
+  TELEGRAM_BOT_USERNAME,
+  TELEGRAM_WEBHOOK_SECRET,
+  jsonHeaders,
+} from "./_shared/config.ts";
 import { json } from "./_shared/utils.ts";
 import { handleAdmin } from "./admin.ts";
 import { handleDevice } from "./device.ts";
@@ -16,13 +22,16 @@ Deno.serve(async (req) => {
     if (!path.startsWith("/")) path = `/${path}`;
 
     if (path === "/" || path === "/health") {
+      const botUsername = TELEGRAM_BOT_USERNAME.replace(/^@/, "").trim();
       return json({
         ok: true,
         service: "moataz-dow",
         telegram_configured: Boolean(
-          Deno.env.get("TELEGRAM_BOT_TOKEN") &&
-            Deno.env.get("TELEGRAM_WEBHOOK_SECRET"),
+          TELEGRAM_BOT_TOKEN &&
+            TELEGRAM_WEBHOOK_SECRET &&
+            botUsername,
         ),
+        bot_username: botUsername,
         admin_configured: Boolean(
           Deno.env.get("ADMIN_PASSWORD_SHA256") &&
             Deno.env.get("ADMIN_SESSION_SECRET"),
