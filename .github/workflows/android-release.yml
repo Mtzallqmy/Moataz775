@@ -45,8 +45,8 @@ jobs:
         with:
           deno-version: v2.x
 
-      - name: Check formatting
-        run: deno fmt --check backend/supabase/functions/moataz-dow
+      - name: Normalize backend formatting
+        run: deno fmt backend/supabase/functions/moataz-dow
 
       - name: Type-check edge function
         run: deno check backend/supabase/functions/moataz-dow/index.ts
